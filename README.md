@@ -2,6 +2,8 @@
 
 OMP-native fork of `@indexyz/pi-provider-sub2api` for the case where one sub2api service has several API keys and each key unlocks a different model pool.
 
+Package version: `0.3.0`. Fork source: `@indexyz/pi-provider-sub2api` version `0.1.35`, upstream commit `83b6832665dd60ea0bdbd467c8e0e7326e03e14e`; see `UPSTREAM.md`.
+
 ## Configure
 
 ```powershell
