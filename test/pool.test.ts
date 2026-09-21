@@ -15,8 +15,12 @@ describe("sub2api multi-key pool", () => {
   });
 
   test("merges and de-duplicates models while preserving credential priority", async () => {
-    const fetchMock = async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = async (input: string | URL | Request, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get("authorization");
+      if (new URL(input.toString()).pathname !== "/v1/models") {
+        const model = JSON.parse(String(init?.body)).model;
+        return Response.json({ model });
+      }
       if (auth === "Bearer A") return Response.json({ data: [{ id: "model-a" }, { id: "shared" }] });
       if (auth === "Bearer B") return Response.json({ data: [{ id: "model-c" }, { id: "shared" }] });
       return new Response(null, { status: 401 });
@@ -28,13 +32,31 @@ describe("sub2api multi-key pool", () => {
   });
 
   test("one invalid key does not hide valid-key models", async () => {
-    const fetchMock = async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = async (input: string | URL | Request, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get("authorization");
+      if (new URL(input.toString()).pathname !== "/v1/models") {
+        return Response.json({ model: JSON.parse(String(init?.body)).model });
+      }
       return auth === "Bearer bad" ? new Response(null, { status: 403 }) : Response.json({ data: [{ id: "ok" }] });
     };
     const pool = await discoverPool([{ id: 1, key: "bad" }, { id: 2, key: "good" }], "https://sub.example/v1", fetchMock as typeof fetch);
     expect(pool.models.map(model => model.id)).toEqual(["ok"]);
     expect(pool.discoveries.map(item => item.status)).toEqual(["invalid-key", "ok"]);
+  });
+
+  test("rejects advertised models that are routed to a different model", async () => {
+    const fetchMock = async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(input.toString()).pathname === "/v1/models") {
+        return Response.json({ data: [{ id: "exact" }, { id: "routed" }, { id: "broken" }] });
+      }
+      const model = JSON.parse(String(init?.body)).model;
+      if (model === "broken") return Response.json({ error: "unavailable" }, { status: 503 });
+      return Response.json({ model: model === "routed" ? "fallback-model" : model });
+    };
+    const pool = await discoverPool([{ id: 1, key: "A" }], "https://sub.example/v1", fetchMock as typeof fetch);
+    expect(pool.models.map(model => model.id)).toEqual(["exact"]);
+    expect(pool.discoveries[0]?.rejectedModelIds).toEqual(["routed", "broken"]);
+    expect(pool.discoveries[0]?.routedModels).toEqual({ routed: "fallback-model" });
   });
 
   test("auto protocol selection is deterministic", () => {

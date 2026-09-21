@@ -4,8 +4,11 @@ import { discoverPool } from "../omp-pool.ts";
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
-  fetch(request) {
-    if (new URL(request.url).pathname !== "/v1/models") return new Response(null, { status: 404 });
+  async fetch(request) {
+    if (new URL(request.url).pathname !== "/v1/models") {
+      const body = await request.json() as { model: string };
+      return Response.json({ model: body.model });
+    }
     const auth = request.headers.get("authorization");
     if (auth === "Bearer key-a") return Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] });
     if (auth === "Bearer key-b") return Response.json({ data: [{ id: "model-c" }, { id: "model-d" }] });

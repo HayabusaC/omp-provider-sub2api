@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import type { ExtensionAPI, ProviderModelConfig } from "@oh-my-pi/pi-coding-agent";
 import { getPluginSettings } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/loader";
 import {
@@ -16,7 +17,7 @@ import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
-import { discoverPool, normalizeBaseURL, routeApi, type KeyDiscovery, type KeyRecord } from "./omp-pool.ts";
+import { discoverPool, normalizeBaseURL, poolFromDiscoveries, routeApi, type KeyDiscovery, type KeyRecord } from "./omp-pool.ts";
 import {
   fetchEffectiveBillingMultiplier,
   fetchPricingSnapshot,
@@ -32,7 +33,12 @@ const UNKNOWN_COST: ProviderModelConfig["cost"] = { input: 0, output: 0, cacheRe
 const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".omp", "agent");
 const cachePath = join(agentDir, "sub2api-model-cache.json");
 
-interface CacheFile { provider: string; baseURL: string; modelIds: string[]; }
+interface CacheFile {
+  provider: string;
+  baseURL: string;
+  modelIds: string[];
+  verifiedModelsByCredential?: Record<string, { keyHash: string; modelIds: string[] }>;
+}
 let liveAuthStorage: any;
 let providerId = "sub2api";
 let apiSetting = "auto";
@@ -40,6 +46,8 @@ let apiBase = "";
 let anthropicBase = "";
 let routes = new Map<string, number[]>();
 let costsByCredential = new Map<number, Map<string, ProviderModelConfig["cost"]>>();
+let verifiedModelsByCredential = new Map<number, string[]>();
+let verifiedKeyHashesByCredential = new Map<number, string>();
 let pricingSnapshotsByCredential = new Map<number, PricingSnapshot>();
 let pricingStatsByCredential = new Map<number, Map<string, Pick<ModelStat, "cost" | "accountCost">>>();
 let billingMultipliersByCredential = new Map<number, number>();
@@ -52,6 +60,10 @@ function storedKeys(): KeyRecord[] {
   return liveAuthStorage.listStoredCredentials(providerId)
     .filter((row: any) => row.credential?.type === "api_key" && typeof row.credential.key === "string")
     .map((row: any) => ({ id: row.id, key: row.credential.key }));
+}
+
+function keyHash(key: string): string {
+  return createHash("sha256").update(key).digest("hex");
 }
 
 function cloneModel(model: Model<Api>, api: Api): Model<Api> {
@@ -145,6 +157,15 @@ async function readCachedModels(): Promise<ProviderModelConfig[]> {
   try {
     const cached = JSON.parse(await readFile(cachePath, "utf8")) as CacheFile;
     if (cached.provider !== providerId || cached.baseURL !== apiBase || !Array.isArray(cached.modelIds)) return [];
+    const verifiedEntries = Object.entries(cached.verifiedModelsByCredential ?? {}).flatMap(([id, entry]) => {
+      const credentialId = Number(id);
+      return Number.isInteger(credentialId) && entry && typeof entry.keyHash === "string"
+        && Array.isArray(entry.modelIds) && entry.modelIds.every(model => typeof model === "string")
+        ? [[credentialId, entry] as const]
+        : [];
+    });
+    verifiedModelsByCredential = new Map(verifiedEntries.map(([id, entry]) => [id, [...new Set(entry.modelIds)]]));
+    verifiedKeyHashesByCredential = new Map(verifiedEntries.map(([id, entry]) => [id, entry.keyHash]));
     return cached.modelIds.map(id => ({
       id, name: id, api: ROUTER_API, reasoning: /(claude|codex|gpt-[56])/iu.test(id), input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200_000, maxTokens: 32_768,
@@ -155,7 +176,15 @@ async function readCachedModels(): Promise<ProviderModelConfig[]> {
 async function writeCachedModels(modelIds: string[]): Promise<void> {
   await mkdir(agentDir, { recursive: true });
   const temporary = `${cachePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify({ provider: providerId, baseURL: apiBase, modelIds }, null, 2), {
+  await writeFile(temporary, JSON.stringify({
+    provider: providerId,
+    baseURL: apiBase,
+    modelIds,
+    verifiedModelsByCredential: Object.fromEntries([...verifiedModelsByCredential].map(([id, modelIds]) => [id, {
+      keyHash: verifiedKeyHashesByCredential.get(id),
+      modelIds,
+    }])),
+  }, null, 2), {
     encoding: "utf8",
     flag: "wx",
   });
@@ -211,22 +240,45 @@ export default async function sub2apiOMP(pi: ExtensionAPI): Promise<void> {
     fetchDynamicModels: async () => cachedModels,
   });
 
-  const performRefresh = async (ctx: any): Promise<PoolSnapshot> => {
+  const performRefresh = async (ctx: any, forceVerify = false): Promise<PoolSnapshot> => {
     liveAuthStorage = ctx.modelRegistry.authStorage;
     const keys = storedKeys();
-    const [snapshot, pricing] = await Promise.all([
-      discoverPool(keys, apiBase),
-      Promise.all(keys.map(async ({ id, key }) => {
+    const activeCredentialIds = new Set(keys.map(({ id }) => id));
+    for (const credentialId of verifiedModelsByCredential.keys()) {
+      if (!activeCredentialIds.has(credentialId)) {
+        verifiedModelsByCredential.delete(credentialId);
+        verifiedKeyHashesByCredential.delete(credentialId);
+      }
+    }
+    const keysToVerify = forceVerify ? keys : keys.filter(({ id, key }) =>
+      !verifiedModelsByCredential.has(id) || verifiedKeyHashesByCredential.get(id) !== keyHash(key));
+    const verified = await discoverPool(keysToVerify, apiBase, fetch, { configuredApi: apiSetting, anthropicBase });
+    const pricing = await Promise.all(keys.map(async ({ id, key }) => {
         const [usage, billingMultiplier] = await Promise.all([
           fetchPricingSnapshot(apiBase, key),
           fetchEffectiveBillingMultiplier(apiBase, key),
         ]);
         return { id, usage, billingMultiplier };
-      })),
-    ]);
+      }));
+    for (const discovery of verified.discoveries) {
+      if (discovery.status === "ok") {
+        verifiedModelsByCredential.set(discovery.credentialId, discovery.modelIds);
+        const key = keys.find(candidate => candidate.id === discovery.credentialId)?.key;
+        if (key) verifiedKeyHashesByCredential.set(discovery.credentialId, keyHash(key));
+      } else {
+        verifiedModelsByCredential.delete(discovery.credentialId);
+        verifiedKeyHashesByCredential.delete(discovery.credentialId);
+      }
+    }
+    const verifiedById = new Map(verified.discoveries.map(discovery => [discovery.credentialId, discovery]));
+    const snapshot = poolFromDiscoveries(keys.map(({ id }) => verifiedById.get(id) ?? {
+      credentialId: id,
+      status: "ok",
+      modelIds: verifiedModelsByCredential.get(id) ?? [],
+      detail: "cached verified pool",
+    }));
     routes = snapshot.routes;
     discoveries = snapshot.discoveries;
-    const activeCredentialIds = new Set(keys.map(({ id }) => id));
     for (const credentialId of pricingSnapshotsByCredential.keys()) {
       if (!activeCredentialIds.has(credentialId)) pricingSnapshotsByCredential.delete(credentialId);
     }
@@ -281,9 +333,9 @@ export default async function sub2apiOMP(pi: ExtensionAPI): Promise<void> {
     return snapshot;
   };
 
-  const refresh = (ctx: any): Promise<PoolSnapshot> => {
+  const refresh = (ctx: any, forceVerify = false): Promise<PoolSnapshot> => {
     if (pendingRefresh) return pendingRefresh;
-    pendingRefresh = performRefresh(ctx).finally(() => { pendingRefresh = undefined; });
+    pendingRefresh = performRefresh(ctx, forceVerify).finally(() => { pendingRefresh = undefined; });
     return pendingRefresh;
   };
 
@@ -296,17 +348,25 @@ export default async function sub2apiOMP(pi: ExtensionAPI): Promise<void> {
     handler: async (_args, ctx) => {
       const key = await ctx.ui.input(`API key for ${providerId} (stored in OMP credentials)`);
       if (!key?.trim()) return;
-      await ctx.modelRegistry.authStorage.upsertCredential(providerId, { type: "api_key", key: key.trim(), source: "login" });
+      const normalizedKey = key.trim();
+      await ctx.modelRegistry.authStorage.upsertCredential(providerId, { type: "api_key", key: normalizedKey, source: "login" });
+      for (const credential of storedKeys()) {
+        if (credential.key === normalizedKey) {
+          verifiedModelsByCredential.delete(credential.id);
+          verifiedKeyHashesByCredential.delete(credential.id);
+        }
+      }
       const snapshot = await refresh(ctx);
-      ctx.ui.notify(`Saved key; merged ${snapshot.models.length} models from ${snapshot.discoveries.filter(item => item.status === "ok").length} valid keys`, "info");
+      const rejected = snapshot.discoveries.reduce((sum, item) => sum + (item.rejectedModelIds?.length ?? 0), 0);
+      ctx.ui.notify(`Saved key; verified ${snapshot.models.length} models from ${snapshot.discoveries.filter(item => item.status === "ok").length} valid keys; rejected ${rejected}`, "info");
     },
   });
 
   pi.registerCommand("sub2api-test", {
     description: "Refresh and report each stored key's model-pool status",
     handler: async (_args, ctx) => {
-      const snapshot = await refresh(ctx);
-      const summary = snapshot.discoveries.map((item, index) => `Key ${index + 1}: ${item.status}${item.httpStatus ? ` HTTP ${item.httpStatus}` : ""}, ${item.modelIds.length} models`).join("; ");
+      const snapshot = await refresh(ctx, true);
+      const summary = snapshot.discoveries.map((item, index) => `Key ${index + 1}: ${item.status}${item.httpStatus ? ` HTTP ${item.httpStatus}` : ""}, ${item.modelIds.length} verified, ${item.rejectedModelIds?.length ?? 0} rejected`).join("; ");
       ctx.ui.notify(`${providerId}: ${snapshot.models.length} merged models — ${summary || "no stored keys"}`, snapshot.models.length ? "info" : "warning");
     },
   });

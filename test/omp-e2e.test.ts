@@ -23,8 +23,12 @@ const server = Bun.serve({
         : Response.json({ error: "invalid key" }, { status: 401 });
     }
     if (url.pathname === "/v1/chat/completions") {
-      const body = await request.json() as { model?: string };
+      const body = await request.json() as { model?: string; stream?: boolean };
       const model = body.model ?? "";
+      if (body.stream !== true) {
+        if (!access.get(key)?.has(model)) return Response.json({ error: "model not permitted" }, { status: 403 });
+        return Response.json({ model, choices: [{ message: { role: "assistant", content: "OK" } }] });
+      }
       routedAttempts.push({ model, key });
       if (model === "shared" && key === "key-a") {
         return Response.json({ error: "model permission revoked" }, { status: 403 });
@@ -36,6 +40,12 @@ const server = Bun.serve({
       return new Response(`${chunk({ role: "assistant", content: text }, null)}${chunk({}, "stop")}data: [DONE]\n\n`, {
         headers: { "Content-Type": "text/event-stream" },
       });
+    }
+    if (url.pathname === "/v1/responses") {
+      const body = await request.json() as { model?: string };
+      const model = body.model ?? "";
+      if (!access.get(key)?.has(model)) return Response.json({ error: "model not permitted" }, { status: 403 });
+      return Response.json({ id: "probe", object: "response", model, status: "completed", output: [], usage: {} });
     }
     return new Response(null, { status: 404 });
   },
