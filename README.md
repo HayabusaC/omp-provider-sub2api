@@ -1,8 +1,15 @@
 # OMP sub2api Multi-Key Provider
 
-OMP-native fork of `@indexyz/pi-provider-sub2api` for the case where one sub2api service has several API keys and each key unlocks a different model pool.
+> **Fork lineage:** This repository is an OMP-native fork derived from the
+> [`pi-provider-sub2api`](https://github.com/5aaee9/pi-agent-extensions/tree/83b6832665dd60ea0bdbd467c8e0e7326e03e14e/pi-provider-sub2api)
+> subdirectory of [`5aaee9/pi-agent-extensions`](https://github.com/5aaee9/pi-agent-extensions),
+> specifically `@indexyz/pi-provider-sub2api` version `0.1.35` at upstream commit
+> [`83b6832665dd60ea0bdbd467c8e0e7326e03e14e`](https://github.com/5aaee9/pi-agent-extensions/commit/83b6832665dd60ea0bdbd467c8e0e7326e03e14e).
+> Because GitHub cannot represent a subdirectory extraction as a repository-level fork,
+> the GitHub UI does not display the usual “forked from” badge. The MIT license and
+> detailed provenance are preserved in [`LICENSE`](LICENSE) and [`UPSTREAM.md`](UPSTREAM.md).
 
-Package version: `0.3.1`. Fork source: `@indexyz/pi-provider-sub2api` version `0.1.35`, upstream commit `83b6832665dd60ea0bdbd467c8e0e7326e03e14e`; see `UPSTREAM.md`.
+Package version: `0.3.1`. This fork adds OMP-native multi-key AuthStorage, per-key model-pool routing and per-key billing-aware USD pricing.
 
 ## Configure
 
