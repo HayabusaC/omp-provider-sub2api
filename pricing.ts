@@ -18,6 +18,7 @@ export interface PricingSnapshot { models: Map<string, ModelStat>; }
 
 const PRICING_TIMEOUT_MS = 10_000;
 const OFFICIAL_PROVIDERS: GeneratedProvider[] = ["openai", "openai-codex", "anthropic", "xai"];
+export const CNY_TO_USD = 0.143;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -95,7 +96,7 @@ export function providerModelCost(
   const official = officialModelCost(modelId);
   const reciprocal = stat && accountCostReciprocal(stat);
   if (!official || reciprocal === undefined || billingMultiplier === undefined) return undefined;
-  const multiplier = reciprocal * billingMultiplier;
+  const multiplier = reciprocal * billingMultiplier * CNY_TO_USD;
   const scale = <T extends ModelCost>(rates: T): T => ({
     ...rates,
     input: rates.input * multiplier,

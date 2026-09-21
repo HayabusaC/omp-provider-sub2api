@@ -2,7 +2,7 @@
 
 OMP-native fork of `@indexyz/pi-provider-sub2api` for the case where one sub2api service has several API keys and each key unlocks a different model pool.
 
-Package version: `0.3.0`. Fork source: `@indexyz/pi-provider-sub2api` version `0.1.35`, upstream commit `83b6832665dd60ea0bdbd467c8e0e7326e03e14e`; see `UPSTREAM.md`.
+Package version: `0.3.1`. Fork source: `@indexyz/pi-provider-sub2api` version `0.1.35`, upstream commit `83b6832665dd60ea0bdbd467c8e0e7326e03e14e`; see `UPSTREAM.md`.
 
 ## Configure
 
@@ -24,7 +24,7 @@ OMP 18.2.7 requires an extension-owned `apiKey` or OAuth declaration when a prov
 
 `api=auto` uses OMP's built-in transports: Claude IDs use Anthropic Messages, GPT/Codex/OpenAI IDs use Responses, and other IDs use Chat Completions. Explicit transport selection is available for homogeneous relays.
 
-Provider model prices start from OMP's built-in official model prices and are scaled by `(model_stats.cost / model_stats.account_cost) × /v1/sub2api/billing.effective_rate_multiplier`. No account multiplier is hard-coded. Until the required official model metadata and server-side multiplier data have been observed, the discovered model keeps its zero-cost fallback rather than inventing a price; transient refresh failures preserve the last valid per-key price.
+Provider model prices start from OMP's built-in official USD model prices and are scaled by `(model_stats.cost / model_stats.account_cost) × /v1/sub2api/billing.effective_rate_multiplier × 0.143`. The billing result is denominated in CNY, so `0.143` converts it to the USD-denominated cost fields used by OMP. This matches actual settlement as `billed CNY × 0.143`. No account multiplier is hard-coded. Until the required official model metadata and server-side multiplier data have been observed, the discovered model keeps its zero-cost fallback rather than inventing a price; transient refresh failures preserve the last valid per-key price.
 
 The model pool and pricing are fetched once at session startup and remain fixed for that session. Adding a key with `/sub2api-key-add` or explicitly running `/sub2api-test` performs another full refresh. Each stored key has its own price map; the request router applies the startup snapshot belonging to the credential actually used, including after credential failover. The shared model picker necessarily displays the first eligible key's price because one selector cannot represent several simultaneous key-specific prices.
 

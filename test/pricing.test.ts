@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  CNY_TO_USD,
   modelPricingStat,
   providerModelCost,
   parsePricingSnapshot,
@@ -50,17 +51,23 @@ describe("Sub2API response pricing", () => {
       { cost: 0.012, accountCost: 0.009 },
       0.25,
     )!;
-    expect(cost.input).toBeCloseTo(0.2 * (1 / 0.75) * 0.25, 12);
-    expect(cost.output).toBeCloseTo(1.2 * (1 / 0.75) * 0.25, 12);
-    expect(cost.cacheRead).toBeCloseTo(0.02 * (1 / 0.75) * 0.25, 12);
-    expect(cost.cacheWrite).toBeCloseTo(0.25 * (1 / 0.75) * 0.25, 12);
+    expect(cost.input).toBeCloseTo(0.2 * (1 / 0.75) * 0.25 * CNY_TO_USD, 12);
+    expect(cost.output).toBeCloseTo(1.2 * (1 / 0.75) * 0.25 * CNY_TO_USD, 12);
+    expect(cost.cacheRead).toBeCloseTo(0.02 * (1 / 0.75) * 0.25 * CNY_TO_USD, 12);
+    expect(cost.cacheWrite).toBeCloseTo(0.25 * (1 / 0.75) * 0.25 * CNY_TO_USD, 12);
   });
 
   test("keeps distinct prices for different keys serving the same model", () => {
     const first = providerModelCost("gpt-5.6-luna", { cost: 1, accountCost: 0.8 }, 0.15)!;
     const second = providerModelCost("gpt-5.6-luna", { cost: 1, accountCost: 0.5 }, 0.3)!;
-    expect(first.input).toBeCloseTo(0.2 * (1 / 0.8) * 0.15, 12);
-    expect(second.input).toBeCloseTo(0.2 * (1 / 0.5) * 0.3, 12);
+    expect(first.input).toBeCloseTo(0.2 * (1 / 0.8) * 0.15 * CNY_TO_USD, 12);
+    expect(second.input).toBeCloseTo(0.2 * (1 / 0.5) * 0.3 * CNY_TO_USD, 12);
     expect(first.input).not.toBe(second.input);
+  });
+
+  test("converts the billing amount from CNY to OMP USD", () => {
+    const cost = providerModelCost("gpt-5.6-luna", { cost: 1, accountCost: 0.8 }, 0.15)!;
+    expect(cost.input).toBeCloseTo(0.2 * 1.25 * 0.15 * 0.143, 12);
+    expect(cost.output).toBeCloseTo(1.2 * 1.25 * 0.15 * 0.143, 12);
   });
 });
