@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["omp-index.ts", "omp-pool.ts", "test/**/*.ts"]
+  "include": ["omp-index.ts", "omp-pool.ts", "pricing.ts", "test/**/*.ts"]
 }

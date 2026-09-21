@@ -16,11 +16,15 @@ No key belongs in plugin settings or `sub2api.json`. Start OMP and run `/sub2api
 
 The merged provider keeps original model IDs and de-duplicates them. Its in-memory route is `model ID → ordered credential IDs`; stored credential order is the deterministic priority when keys overlap. Requests automatically use the first key that advertised the model. A pre-output 401/403 or model-permission rejection advances only to the next key for that model. A failed key or one key's model endpoint error does not disable the provider.
 
-The non-secret merged model cache at `~/.omp/agent/sub2api-model-cache.json` lets registry consumers see the last successful union before the first session refresh. It contains only provider/base URL/model IDs—never credentials.
+The non-secret merged model cache at `~/.omp/agent/sub2api-model-cache.json` lets registry consumers see the last refreshed union before the first session refresh. It contains only provider/base URL/model IDs—never credentials. A refresh republishes the complete union to OMP immediately; if no stored key currently yields models, the empty result also replaces the stale cache instead of leaving inaccessible models visible.
 
-OMP 18.2.6 requires an extension-owned `apiKey` or OAuth declaration when a provider supplies a static `models` array. This plugin deliberately does neither: cached and refreshed unions are exposed through authoritative dynamic discovery, preserving OMP AuthStorage as the only credential source.
+OMP 18.2.7 requires an extension-owned `apiKey` or OAuth declaration when a provider supplies a static `models` array. This plugin deliberately does neither: cached and refreshed unions are exposed through authoritative dynamic discovery, preserving OMP AuthStorage as the only credential source.
 
 `api=auto` uses OMP's built-in transports: Claude IDs use Anthropic Messages, GPT/Codex/OpenAI IDs use Responses, and other IDs use Chat Completions. Explicit transport selection is available for homogeneous relays.
+
+Provider model prices start from OMP's built-in official model prices and are scaled by `(model_stats.cost / model_stats.account_cost) × /v1/sub2api/billing.effective_rate_multiplier`. No account multiplier is hard-coded. Until the required official model metadata and server-side multiplier data have been observed, the discovered model keeps its zero-cost fallback rather than inventing a price; transient refresh failures preserve the last valid per-key price.
+
+The model pool and pricing are fetched once at session startup and remain fixed for that session. Adding a key with `/sub2api-key-add` or explicitly running `/sub2api-test` performs another full refresh. Each stored key has its own price map; the request router applies the startup snapshot belonging to the credential actually used, including after credential failover. The shared model picker necessarily displays the first eligible key's price because one selector cannot represent several simultaneous key-specific prices.
 
 See `UPSTREAM.md` for fork provenance. The retained upstream files are not the OMP entry point; `package.json#omp.extensions` loads only `omp-index.ts`.
 

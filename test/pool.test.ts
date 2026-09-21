@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isAuthOrPermissionFailure } from "../omp-index.ts";
+import { costForCredential, isAuthOrPermissionFailure } from "../omp-index.ts";
 import { discoverPool, normalizeBaseURL, routeApi } from "../omp-pool.ts";
 
 describe("sub2api multi-key pool", () => {
@@ -49,5 +49,14 @@ describe("sub2api multi-key pool", () => {
     expect(isAuthOrPermissionFailure({ errorStatus: 403, errorMessage: "denied" })).toBe(true);
     expect(isAuthOrPermissionFailure({ errorStatus: 404, errorMessage: "model not found" })).toBe(true);
     expect(isAuthOrPermissionFailure({ errorStatus: 500, errorMessage: "upstream" })).toBe(false);
+  });
+
+  test("never borrows another credential's model price during failover", () => {
+    const first = { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 };
+    const costs = new Map([[10, new Map([["shared", first]])]]);
+    expect(costForCredential(costs, 10, "shared")).toBe(first);
+    expect(costForCredential(costs, 20, "shared")).toEqual({
+      input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+    });
   });
 });
