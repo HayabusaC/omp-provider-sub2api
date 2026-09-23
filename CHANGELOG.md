@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 - 2026-09-24
 
 - Round scaled model rates to 12 decimal places before OMP calculates request costs, avoiding long floating-point `99999` tails.
 

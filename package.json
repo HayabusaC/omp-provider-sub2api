@@ -1,6 +1,6 @@
 {
   "name": "omp-provider-sub2api",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "OMP-native multi-key model-pool router derived from @indexyz/pi-provider-sub2api.",
   "type": "module",
   "license": "MIT",
