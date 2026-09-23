@@ -1,17 +1,58 @@
 # OMP sub2api Multi-Key Provider
 
-> **Fork lineage:** This repository is an OMP-native fork derived from the
-> [`pi-provider-sub2api`](https://github.com/5aaee9/pi-agent-extensions/tree/83b6832665dd60ea0bdbd467c8e0e7326e03e14e/pi-provider-sub2api)
-> subdirectory of [`5aaee9/pi-agent-extensions`](https://github.com/5aaee9/pi-agent-extensions),
-> specifically `@indexyz/pi-provider-sub2api` version `0.1.35` at upstream commit
-> [`83b6832665dd60ea0bdbd467c8e0e7326e03e14e`](https://github.com/5aaee9/pi-agent-extensions/commit/83b6832665dd60ea0bdbd467c8e0e7326e03e14e).
-> Because GitHub cannot represent a subdirectory extraction as a repository-level fork,
-> the GitHub UI does not display the usual “forked from” badge. The MIT license and
-> detailed provenance are preserved in [`LICENSE`](LICENSE) and [`UPSTREAM.md`](UPSTREAM.md).
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-Package version: `0.4.0`. This fork adds OMP-native multi-key AuthStorage, verified per-key model-pool routing and per-key billing-aware USD pricing.
+A multi-key sub2api provider for [oh-my-pi (OMP)](https://omp.sh/). It discovers and verifies the models available to each API key, merges them into one provider, routes each request to a key that can access the selected model, and can fail over to another eligible key when authentication or model-permission errors occur before output begins.
 
-## Configure
+Current version: `0.4.0`.
+
+## Features
+
+- Stores multiple API keys in OMP's native `AuthStorage`; keys are never written to plugin settings or the model cache.
+- Discovers `/v1/models` separately for every key and verifies each advertised model with a minimal non-streaming request.
+- Merges the verified model sets while preserving original upstream model IDs.
+- Routes requests through an ordered `model ID → credential IDs` pool.
+- Fails over on pre-output 401, 403, 404, or model-permission failures.
+- Automatically selects Anthropic Messages, OpenAI Responses, or Chat Completions by model ID.
+- Calculates key-specific OMP price estimates from sub2api usage and billing multipliers.
+- Keeps a non-secret model cache so OMP can display the last published model set during startup.
+
+## Requirements
+
+- OMP `18.2.10` or a compatible release.
+- Bun only when developing from source or running tests.
+- A sub2api service exposing compatible endpoints:
+  - `GET /v1/models`
+  - `POST /v1/responses`
+  - `POST /v1/chat/completions`
+  - `POST /v1/messages` for Claude/Anthropic models
+  - Optional `GET /v1/usage` and `GET /v1/sub2api/billing` for price estimates
+
+## Installation
+
+Install from npm:
+
+```powershell
+omp plugin install omp-provider-sub2api
+```
+
+For local development, run from this repository's parent workspace:
+
+```powershell
+npm install
+omp plugin link .\omp-provider-sub2api
+```
+
+Confirm that OMP loaded the plugin:
+
+```powershell
+omp plugin list
+omp plugin doctor omp-provider-sub2api
+```
+
+## Quick start
+
+### 1. Configure the relay
 
 ```powershell
 omp plugin config set omp-provider-sub2api providerId sub2api
@@ -19,24 +60,200 @@ omp plugin config set omp-provider-sub2api baseURL https://relay.example.com
 omp plugin config set omp-provider-sub2api api auto
 ```
 
-For isolated development only, `SUB2API_BASE_URL` can supply the non-secret base URL when the plugin is loaded explicitly with `omp -e`. Persisted plugin settings take precedence. API keys never use this environment fallback and remain in OMP AuthStorage.
+`baseURL` may include or omit the trailing `/v1`; the plugin normalizes it. It must be an HTTP(S) URL without embedded credentials, a query string, or a fragment.
 
-No key belongs in plugin settings or `sub2api.json`. Start OMP and run `/sub2api-key-add` once per key. Each key is persisted by OMP AuthStorage under the configured provider ID. Registration treats `/v1/models` only as an untrusted candidate list: it makes one minimal, non-streaming request to every advertised model with that exact key. A model is retained only when the request succeeds and the response reports the exact requested model ID; failed models and responses routed to another model are discarded. These probes are real upstream requests and may incur minimal charges. Verification is cached per OMP credential ID, so normal session startup does not repeat it. `/sub2api-test` explicitly re-fetches and re-verifies every stored key.
+### 2. Add API keys
 
-The merged provider keeps original model IDs and de-duplicates them. Its in-memory route is `model ID → ordered credential IDs`; stored credential order is the deterministic priority when keys overlap. Requests automatically use the first key that advertised the model. A pre-output 401/403 or model-permission rejection advances only to the next key for that model. A failed key or one key's model endpoint error does not disable the provider.
+Start interactive OMP and run this once for each key:
 
-The non-secret merged model cache at `~/.omp/agent/sub2api-model-cache.json` lets registry consumers see the last refreshed union before the first session refresh. It contains provider/base URL/model IDs and one-way SHA-256 key fingerprints used to invalidate replaced credentials—never API keys. A refresh republishes the complete union to OMP immediately; if no stored key currently yields models, the empty result also replaces the stale cache instead of leaving inaccessible models visible.
+```text
+/sub2api-key-add
+```
 
-OMP 18.2.7 requires an extension-owned `apiKey` or OAuth declaration when a provider supplies a static `models` array. This plugin deliberately does neither: cached and refreshed unions are exposed through authoritative dynamic discovery, preserving OMP AuthStorage as the only credential source.
+OMP saves the entered value in `AuthStorage`. Adding a key triggers model discovery and verification. Verification makes real upstream requests and may incur a small charge.
 
-`api=auto` uses OMP's built-in transports: Claude IDs use Anthropic Messages, GPT/Codex/OpenAI IDs use Responses, and other IDs use Chat Completions. Explicit transport selection is available for homogeneous relays.
+### 3. Verify and select a model
 
-Provider model prices start from OMP's built-in official USD model prices and are scaled by `(model_stats.cost / model_stats.account_cost) × /v1/sub2api/billing.effective_rate_multiplier × 0.143`. The billing result is denominated in CNY, so `0.143` converts it to the USD-denominated cost fields used by OMP. This matches actual settlement as `billed CNY × 0.143`. No account multiplier is hard-coded. Until the required official model metadata and server-side multiplier data have been observed, the discovered model keeps its zero-cost fallback rather than inventing a price; transient refresh failures preserve the last valid per-key price.
+```text
+/sub2api-test
+/model
+```
 
-The verified model pool and pricing are loaded once at session startup and remain fixed for that session. Adding a key with `/sub2api-key-add` verifies only that new or replaced key; explicitly running `/sub2api-test` forces re-verification of every stored key. Each stored key has its own price map; the request router applies the startup snapshot belonging to the credential actually used, including after credential failover. The shared model picker necessarily displays the first eligible key's price because one selector cannot represent several simultaneous key-specific prices.
+You can also inspect or refresh models from the shell:
 
-See `UPSTREAM.md` for fork provenance. The retained upstream files are not the OMP entry point; `package.json#omp.extensions` loads only `omp-index.ts`.
+```powershell
+omp models sub2api
+omp models refresh
+```
 
-## Verification
+The full selector is `sub2api/<model-id>`. If you change `providerId`, the selector prefix changes with it.
 
-`bun test` includes an isolated end-to-end OMP test. It creates a temporary native `AuthStorage`, starts a local HTTP-compatible sub2api fixture, loads only `omp-index.ts` with `-e`, verifies the merged selectors, and invokes `model-a` with Key A plus `model-c` with Key B. A shared model deliberately returns 403 for Key A and succeeds with Key B, confirming pre-output credential failover. No test installs the plugin or writes the real OMP configuration.
+## Configuration
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `providerId` | `sub2api` | OMP provider ID for the merged pool and the AuthStorage credential namespace |
+| `baseURL` | empty | Relay root; accepts either `https://host` or `https://host/v1` |
+| `api` | `auto` | Transport used by discovered models; see below |
+
+Supported `api` values:
+
+| Value | Behavior |
+| --- | --- |
+| `auto` | IDs containing `claude` use Anthropic Messages; GPT, Codex, ChatGPT, and `o`-series IDs use OpenAI Responses; all other IDs use Chat Completions |
+| `openai-responses` | Every model uses `POST /v1/responses` |
+| `openai-completions` | Every model uses `POST /v1/chat/completions` |
+| `anthropic-messages` | Every model uses `POST /v1/messages` |
+
+An explicit transport is useful for homogeneous relays. Keep `auto` when one relay serves a mixture of Claude, OpenAI, and other compatible models.
+
+Changing `providerId` does not migrate credentials stored under the old ID; add them again under the new ID. Reload OMP or refresh models after changing `baseURL` or `api`.
+
+### Development-only base URL
+
+When loading the extension directly with `omp -e`, `SUB2API_BASE_URL` supplies the non-secret base URL if the saved plugin setting is empty:
+
+```powershell
+$env:SUB2API_BASE_URL = "https://relay.example.com"
+omp -e .\omp-provider-sub2api\omp-index.ts
+```
+
+The saved `baseURL` takes precedence. API keys have no environment-variable fallback and remain managed by OMP `AuthStorage`.
+
+## Commands
+
+| Command | Behavior |
+| --- | --- |
+| `/sub2api-key-add` | Prompts for one API key, saves or updates an OMP credential, and refreshes the model pool |
+| `/sub2api-test` | Ignores the verification cache, rediscovers and re-verifies every stored key, and reports per-key status |
+
+Statuses reported by `/sub2api-test`:
+
+- `ok`: `/v1/models` succeeded; the result also gives verified and rejected model counts.
+- `invalid-key`: the model-list request returned 401 or 403.
+- `endpoint-error`: a network error, timeout, malformed payload, or another model-list HTTP error occurred.
+
+The plugin currently registers no key-list or key-delete command. Credential lifecycle outside key addition remains the responsibility of OMP's AuthStorage/credential management facilities.
+
+## How it works
+
+### Discovery and verification
+
+For each key, the plugin:
+
+1. sends an authenticated `GET /v1/models` request to obtain candidate IDs;
+2. sends a non-streaming request with at most 16 output tokens for every candidate, using the configured transport;
+3. retains the model only when the request succeeds and the response `model` exactly matches the requested ID;
+4. rejects candidates that the relay silently redirects to a different model;
+5. merges, deduplicates, and sorts the verified model IDs from every valid key.
+
+Probe concurrency is 4. The model-list timeout is 10 seconds, and each model probe has a 30-second timeout. Initial verification can therefore take time when a relay advertises many models or responds slowly.
+
+Normal startup reuses verification cached by credential ID. Replacing a key changes its SHA-256 fingerprint and forces that credential to be verified again. `/sub2api-test` always forces verification of all keys.
+
+### Routing and failover
+
+Each model maps to eligible credentials in storage order. A request freezes the current route, keys, and prices so a background refresh cannot alter an in-flight failover chain.
+
+The first eligible key is tried first. Before the first text, thinking, tool-call, or completion event is emitted, the router advances to the next eligible key after:
+
+- HTTP 401, 403, or 404; or
+- an error message indicating unauthorized/forbidden access, a permission failure, or an unavailable, unsupported, or missing model.
+
+After any content has been emitted, the request is not replayed and no key failover occurs, which avoids duplicate output. Rate limits, network errors, server errors, and other non-permission failures are returned to OMP without cross-key retry.
+
+### Model cache
+
+The default cache path is:
+
+```text
+~/.omp/agent/sub2api-model-cache.json
+```
+
+When `PI_CODING_AGENT_DIR` is set, the file is stored there instead. It contains the provider ID, normalized base URL, model IDs, credential IDs, and SHA-256 key fingerprints. It never contains plaintext API keys. The cache lets OMP show the last published model union before the process performs its first online refresh.
+
+A completed refresh publishes the current full union. An empty result also replaces stale models, so inaccessible models do not remain visible.
+
+## Price estimates
+
+For each key, the plugin reads:
+
+- per-model `model_stats.cost` and `model_stats.account_cost` from `GET /v1/usage`;
+- `effective_rate_multiplier` from `GET /v1/sub2api/billing`; and
+- the model's official USD price from OMP's bundled catalog.
+
+The OMP model cost is:
+
+```text
+official USD price × (model_stats.cost / model_stats.account_cost)
+                   × effective_rate_multiplier × 0.143
+```
+
+The `0.143` factor converts sub2api's CNY settlement amount into OMP's USD cost fields. One model selector can display only one price, so the picker shows the first eligible key's price. At request time, the router applies the price belonging to the key that actually serves the request, including after failover.
+
+If official metadata, a valid usage ratio, or the billing multiplier is unavailable, the price remains `0` instead of being guessed. A transient refresh failure preserves the last valid pricing data for that key. These values are session estimates, not authoritative sub2api invoice settlement.
+
+## Troubleshooting
+
+### `inactive: configure baseURL`
+
+The plugin could not resolve a service URL. Configure it and inspect plugin health:
+
+```powershell
+omp plugin config set omp-provider-sub2api baseURL https://relay.example.com
+omp plugin doctor omp-provider-sub2api
+```
+
+### The model list is empty
+
+1. Run `/sub2api-key-add` at least once.
+2. Confirm that `baseURL` points to the correct relay and `/v1/models` is reachable.
+3. Run `/sub2api-test` to distinguish `invalid-key`, `endpoint-error`, and candidates rejected by verification.
+4. Confirm that `api` matches the endpoints supported by the relay.
+5. Reload the session after setting changes and run `omp models refresh` if needed.
+
+### `/v1/models` returns IDs, but the plugin does not publish them
+
+The inventory is only a candidate list. The minimal generation request must succeed, and the response `model` must exactly match the candidate ID. Common causes are missing inference permission, a wrong transport setting, no support for non-streaming calls, or silent routing to another model.
+
+### A shared model did not fail over
+
+Failover occurs only before output and only for authentication, permission, or model-availability failures. It does not occur after a token has been emitted, or for HTTP 429, 5xx, network interruption, and ordinary protocol errors.
+
+### Prices stay at zero
+
+Pricing requires an exact model ID in OMP's official catalog, positive usable `cost/account_cost` data from `/v1/usage`, and a valid multiplier from `/v1/sub2api/billing`. A new key or a model with no prior usage may not yet provide enough data.
+
+## Security notes
+
+- OMP `AuthStorage` holds API keys; `sub2api-model-cache.json` does not.
+- Cached SHA-256 fingerprints detect replaced keys. They are not reversible keys, but the OMP data directory should still be protected.
+- Do not place keys in `baseURL`, plugin settings, shell history, or repository files.
+- Use a trusted HTTPS relay except in a controlled local development environment.
+- Verification sends the fixed prompt `Reply OK` to upstream models and can be billable.
+
+## Development and verification
+
+From the parent workspace:
+
+```powershell
+npm run typecheck --workspace omp-provider-sub2api
+npm test --workspace omp-provider-sub2api
+npm run build --workspace omp-provider-sub2api
+```
+
+Or from the plugin directory with Bun:
+
+```powershell
+bun run typecheck
+bun test
+bun run build
+```
+
+Tests use synthetic keys, temporary AuthStorage, and a loopback HTTP fixture; they do not modify the real OMP configuration. The end-to-end test finds `omp` on `PATH`; set `OMP_BIN` to select another executable.
+
+## Upstream and license
+
+This plugin is derived from [`@indexyz/pi-provider-sub2api` 0.1.35](https://github.com/5aaee9/pi-agent-extensions/tree/83b6832665dd60ea0bdbd467c8e0e7326e03e14e/pi-provider-sub2api) at upstream commit [`83b6832`](https://github.com/5aaee9/pi-agent-extensions/commit/83b6832665dd60ea0bdbd467c8e0e7326e03e14e). See [`UPSTREAM.md`](UPSTREAM.md) for provenance and [`LICENSE`](LICENSE) for license terms.
+
+`package.json#omp.extensions` loads `omp-index.ts`. Other retained upstream entry files are not this package's OMP entry point.

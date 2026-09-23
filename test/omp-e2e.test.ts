@@ -54,7 +54,7 @@ const server = Bun.serve({
 let isolatedAgentDir = "";
 let isolatedConfigRoot = "";
 const pluginEntry = join(import.meta.dir, "..", "omp-index.ts");
-const ompExe = "C:\\Users\\Shen Chenye\\.bun\\bin\\omp.exe";
+const ompExe = process.env.OMP_BIN || "omp";
 
 beforeAll(async () => {
   isolatedConfigRoot = await mkdtemp(join(tmpdir(), "omp-sub2api-e2e-"));
