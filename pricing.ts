@@ -27,6 +27,10 @@ const OFFICIAL_PROVIDERS: GeneratedProvider[] = [
 const GEMINI_ROUTING_SUFFIX = /-(?:low|medium|high|tiered)$/u;
 export const CNY_TO_USD = 0.143;
 
+function roundPrice(value: number): number {
+  return Number(value.toFixed(12));
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -127,10 +131,10 @@ export function providerModelCost(
   const multiplier = reciprocal * billingMultiplier * CNY_TO_USD;
   const scale = <T extends ModelCost>(rates: T): T => ({
     ...rates,
-    input: rates.input * multiplier,
-    output: rates.output * multiplier,
-    cacheRead: rates.cacheRead * multiplier,
-    cacheWrite: rates.cacheWrite * multiplier,
+    input: roundPrice(rates.input * multiplier),
+    output: roundPrice(rates.output * multiplier),
+    cacheRead: roundPrice(rates.cacheRead * multiplier),
+    cacheWrite: roundPrice(rates.cacheWrite * multiplier),
   });
   return { ...scale(official), longContext: official.longContext ? scale(official.longContext) : undefined };
 }

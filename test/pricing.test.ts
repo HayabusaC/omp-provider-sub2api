@@ -118,4 +118,16 @@ describe("Sub2API response pricing", () => {
     ];
     expect(modelIds.filter(modelId => !officialModelCost(modelId))).toEqual([]);
   });
+
+  test("rounds scaled rates before OMP computes per-request costs", () => {
+    const cost = providerModelCost("gemini-2.5-flash", { cost: 1, accountCost: 1 }, 0.35)!;
+    expect(cost).toMatchObject({
+      input: 0.015015,
+      output: 0.125125,
+      cacheRead: 0.0015015,
+      cacheWrite: 0,
+    });
+    expect(2329 * cost.input / 1_000_000).toBe(0.000034969935);
+    expect(6 * cost.output / 1_000_000).toBe(7.5075e-7);
+  });
 });

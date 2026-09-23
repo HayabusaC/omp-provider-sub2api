@@ -193,7 +193,7 @@ The `0.143` factor converts sub2api's CNY settlement amount into OMP's USD cost 
 
 Price lookup prefers the complete model ID, then tries the ID without a provider prefix such as `google/`. Gemini additionally uses bounded alias matching: sub2api routing suffixes `-low`, `-medium`, `-high`, and `-tiered` are removed, and the official catalog's `-preview` variant is considered when needed. The plugin does not use broad similarity matching across model versions or families.
 
-If official metadata, a valid usage ratio, or the billing multiplier is unavailable, the price remains `0` instead of being guessed. A transient refresh failure preserves the last valid pricing data for that key. These values are session estimates, not authoritative sub2api invoice settlement.
+Per-million-token rates are rounded to 12 decimal places before they are written to OMP, preventing long JavaScript floating-point `99999` tails in calculated costs. If official metadata, a valid usage ratio, or the billing multiplier is unavailable, the price remains `0` instead of being guessed. A transient refresh failure preserves the last valid pricing data for that key. These values are session estimates, not authoritative sub2api invoice settlement.
 
 ## Troubleshooting
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Round scaled model rates to 12 decimal places before OMP calculates request costs, avoiding long floating-point `99999` tails.
+
 ## 0.4.1 - 2026-09-24
 
 - Resolve Gemini prices from OMP's bundled Google catalog, including bounded matching for provider-prefixed IDs and sub2api `-low`, `-medium`, `-high`, `-tiered`, and `-preview` variants.
