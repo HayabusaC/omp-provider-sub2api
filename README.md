@@ -4,7 +4,7 @@
 
 A multi-key sub2api provider for [oh-my-pi (OMP)](https://omp.sh/). It discovers and verifies the models available to each API key, merges them into one provider, routes each request to a key that can access the selected model, and can fail over to another eligible key when authentication or model-permission errors occur before output begins.
 
-Current version: `0.4.0`.
+Current version: `0.4.1`.
 
 ## Features
 
