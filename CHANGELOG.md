@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Resolve Gemini prices from OMP's bundled Google catalog, including bounded matching for provider-prefixed IDs and sub2api `-low`, `-medium`, `-high`, `-tiered`, and `-preview` variants.
+
 ## 0.1.35 - 2026-09-15
 
 - Synchronize the package version with `@indexyz/pi-model-trace` for coordinated workspace releases.

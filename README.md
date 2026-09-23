@@ -180,7 +180,7 @@ For each key, the plugin reads:
 
 - per-model `model_stats.cost` and `model_stats.account_cost` from `GET /v1/usage`;
 - `effective_rate_multiplier` from `GET /v1/sub2api/billing`; and
-- the model's official USD price from OMP's bundled catalog.
+- the model's official USD price from OMP's bundled OpenAI, Anthropic, Google, and xAI catalogs.
 
 The OMP model cost is:
 
@@ -190,6 +190,8 @@ official USD price × (model_stats.cost / model_stats.account_cost)
 ```
 
 The `0.143` factor converts sub2api's CNY settlement amount into OMP's USD cost fields. One model selector can display only one price, so the picker shows the first eligible key's price. At request time, the router applies the price belonging to the key that actually serves the request, including after failover.
+
+Price lookup prefers the complete model ID, then tries the ID without a provider prefix such as `google/`. Gemini additionally uses bounded alias matching: sub2api routing suffixes `-low`, `-medium`, `-high`, and `-tiered` are removed, and the official catalog's `-preview` variant is considered when needed. The plugin does not use broad similarity matching across model versions or families.
 
 If official metadata, a valid usage ratio, or the billing multiplier is unavailable, the price remains `0` instead of being guessed. A transient refresh failure preserves the last valid pricing data for that key. These values are session estimates, not authoritative sub2api invoice settlement.
 

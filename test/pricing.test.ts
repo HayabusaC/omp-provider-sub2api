@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   CNY_TO_USD,
   modelPricingStat,
+  officialModelCost,
+  officialModelIdCandidates,
   providerModelCost,
   parsePricingSnapshot,
   upstreamAccountRateMultiplier,
@@ -69,5 +71,51 @@ describe("Sub2API response pricing", () => {
     const cost = providerModelCost("gpt-5.6-luna", { cost: 1, accountCost: 0.8 }, 0.15)!;
     expect(cost.input).toBeCloseTo(0.2 * 1.25 * 0.15 * 0.143, 12);
     expect(cost.output).toBeCloseTo(1.2 * 1.25 * 0.15 * 0.143, 12);
+  });
+
+  test("loads exact Gemini prices from the Google catalog", () => {
+    expect(officialModelCost("gemini-2.5-flash")).toMatchObject({
+      input: 0.3,
+      output: 2.5,
+      cacheRead: 0.03,
+    });
+    expect(officialModelCost("google/gemini-3.7-flash")).toMatchObject({
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+    });
+  });
+
+  test("uses bounded Gemini aliases for sub2api routing variants", () => {
+    expect(officialModelIdCandidates("gemini-3-flash")).toEqual([
+      "gemini-3-flash",
+      "gemini-3-flash-preview",
+    ]);
+    expect(officialModelCost("gemini-3-flash")).toEqual(
+      officialModelCost("gemini-3-flash-preview"),
+    );
+    expect(officialModelCost("gemini-3.1-pro-preview-low")).toEqual(
+      officialModelCost("gemini-3.1-pro-preview"),
+    );
+    expect(officialModelCost("gemini-3.6-flash-tiered")).toEqual(
+      officialModelCost("gemini-3.6-flash"),
+    );
+  });
+
+  test("resolves every Gemini ID observed from sub2api", () => {
+    const modelIds = [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-3-flash",
+      "gemini-3-flash-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro-preview-low",
+      "gemini-3.6-flash",
+      "gemini-3.6-flash-tiered",
+      "gemini-3.7-flash",
+    ];
+    expect(modelIds.filter(modelId => !officialModelCost(modelId))).toEqual([]);
   });
 });

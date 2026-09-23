@@ -17,7 +17,14 @@ export interface ModelStat {
 export interface PricingSnapshot { models: Map<string, ModelStat>; }
 
 const PRICING_TIMEOUT_MS = 10_000;
-const OFFICIAL_PROVIDERS: GeneratedProvider[] = ["openai", "openai-codex", "anthropic", "xai"];
+const OFFICIAL_PROVIDERS: GeneratedProvider[] = [
+  "openai",
+  "openai-codex",
+  "anthropic",
+  "google",
+  "xai",
+];
+const GEMINI_ROUTING_SUFFIX = /-(?:low|medium|high|tiered)$/u;
 export const CNY_TO_USD = 0.143;
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -80,10 +87,31 @@ export function modelPricingStat(
   return cost > 0 && accountCost > 0 ? { cost, accountCost } : undefined;
 }
 
+export function officialModelIdCandidates(modelId: string): string[] {
+  const candidates = new Set<string>();
+  const add = (candidate: string) => {
+    if (candidate) candidates.add(candidate);
+  };
+  add(modelId);
+
+  const separator = modelId.lastIndexOf("/");
+  if (separator >= 0) add(modelId.slice(separator + 1));
+
+  for (const candidate of [...candidates]) {
+    if (!candidate.startsWith("gemini-")) continue;
+    const withoutRoutingSuffix = candidate.replace(GEMINI_ROUTING_SUFFIX, "");
+    add(withoutRoutingSuffix);
+    if (!withoutRoutingSuffix.endsWith("-preview")) add(`${withoutRoutingSuffix}-preview`);
+  }
+  return [...candidates];
+}
+
 export function officialModelCost(modelId: string): ModelCost | undefined {
-  for (const provider of OFFICIAL_PROVIDERS) {
-    const model = getBundledModels(provider).find((candidate) => candidate.id === modelId);
-    if (model) return model.cost;
+  for (const candidateId of officialModelIdCandidates(modelId)) {
+    for (const provider of OFFICIAL_PROVIDERS) {
+      const model = getBundledModels(provider).find((candidate) => candidate.id === candidateId);
+      if (model) return model.cost;
+    }
   }
   return undefined;
 }

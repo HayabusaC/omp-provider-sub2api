@@ -182,7 +182,7 @@ OMP 当前没有由本插件注册的密钥列表或删除命令；凭据生命�
 
 - `GET /v1/usage` 中对应模型的 `model_stats.cost` 与 `model_stats.account_cost`；
 - `GET /v1/sub2api/billing` 中的 `effective_rate_multiplier`；
-- OMP 内置 catalog 中该模型的官方美元单价。
+- OMP 内置 OpenAI、Anthropic、Google 和 xAI catalog 中该模型的官方美元单价。
 
 最终写入 OMP 的模型价格为：
 
@@ -192,6 +192,8 @@ OMP 当前没有由本插件注册的密钥列表或删除命令；凭据生命�
 ```
 
 `0.143` 用于把 sub2api 的 CNY 结算金额换算到 OMP 的 USD 成本字段。模型选择器只能显示一个价格，因此显示第一个可用密钥的价格；真正发起请求时，插件会使用实际服务密钥对应的价格，包括故障转移后的密钥。
+
+价格匹配优先使用完整模型 ID，其次移除 `google/` 等 provider 前缀。Gemini 还支持有界别名匹配：移除 sub2api 的 `-low`、`-medium`、`-high`、`-tiered` 路由后缀，并在需要时匹配官方 catalog 中的 `-preview` 型号。插件不会跨模型版本或系列做宽泛相似度匹配。
 
 缺少官方模型元数据、有效用量比率或计费倍率时，价格保留为 `0`，不会猜测。临时刷新失败时保留该密钥上一次有效的价格数据。这里是会话成本估算，不是 sub2api 账单的最终结算结果。
 
